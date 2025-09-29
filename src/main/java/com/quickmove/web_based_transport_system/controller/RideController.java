@@ -14,8 +14,13 @@ public class RideController {
     private RideService rideService;
 
     @PostMapping("/book")
-    public ResponseEntity<Ride> bookRide(@RequestBody Ride ride) {
-        return ResponseEntity.ok(rideService.createRide(ride));
+    public ResponseEntity<Ride> bookRide(@RequestBody Ride ride, @RequestParam String currentLocation) {
+        return ResponseEntity.ok(rideService.createRide(ride, currentLocation));
+    }
+
+    @GetMapping("/available-drivers")
+    public ResponseEntity<List<String>> getAvailableDrivers(@RequestParam String pickupLocation) {
+        return ResponseEntity.ok(rideService.getAvailableDrivers(pickupLocation));
     }
 
     @PutMapping("/update-location/{id}")

@@ -36,7 +36,8 @@
 
     <!-- Pickup & Dropoff Inputs -->
     <input type="text" id="pickupInput" placeholder="Pickup Location" class="w-full p-3 mb-3 border border-gray-300 rounded-lg" readonly>
-    <input type="text" id="dropoffInput" placeholder="Dropoff Location" class="w-full p-3 mb-5 border border-gray-300 rounded-lg" readonly>
+    <input type="text" id="dropoffInput" placeholder="Dropoff Location" class="w-full p-3 mb-5 border border-gray-300 rounded-lg" oninput="searchLocation()">
+    <button id="setDropoffBtn" class="w-full bg-orange-500 text-white p-2 mb-5 rounded-lg font-semibold shadow-md hover:bg-orange-600">Set Dropoff</button>
 
     <!-- Vehicle Selection -->
     <div class="grid grid-cols-3 gap-4 mb-5">
@@ -72,7 +73,7 @@
 </div>
 
 <script>
-    let map, pickupMarker, dropoffMarker, routeLayer, clickCount = 0;
+    let map, pickupMarker, dropoffMarker, routeLayer, suggestedDropoff;
     const geoapifyApiKey = '9efd1d5a33794a978148be1526c83da6';
 
     function initMap() {
@@ -80,25 +81,50 @@
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
-        map.on('click', onMapClick);
+
+        // Set initial pickup to current location
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    if (!pickupMarker) {
+                        pickupMarker = L.marker([latitude, longitude], {
+                            icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] })
+                        }).addTo(map);
+                        updateLocation('pickup', latitude, longitude);
+                        map.setView([latitude, longitude], 13);
+                    }
+                },
+                (error) => console.error("Error getting location:", error)
+            );
+        }
     }
 
-    function onMapClick(e) {
-        const { lat, lng } = e.latlng;
-        clickCount++;
-        if (clickCount === 1) {
-            if (pickupMarker) pickupMarker.remove();
-            pickupMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) }).addTo(map);
-            updateLocation('pickup', lat, lng);
-        } else if (clickCount === 2) {
-            if (dropoffMarker) dropoffMarker.remove();
-            dropoffMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map);
-            updateLocation('dropoff', lat, lng);
-            calculateDistance();
-            clickCount = 0;
-        }
-        map.fitBounds([pickupMarker?.getLatLng() || [6.9271, 79.8612], dropoffMarker?.getLatLng() || [6.9271, 79.8612]]);
+    async function searchLocation() {
+        const query = document.getElementById('dropoffInput').value;
+        if (query.length < 3) return;
+
+        const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(query)}&apiKey=${geoapifyApiKey}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.features?.length) {
+                const { lat, lon } = data.features[0].properties;
+                suggestedDropoff = L.latLng(lat, lon);
+                if (dropoffMarker) dropoffMarker.remove();
+                dropoffMarker = L.marker(suggestedDropoff, {
+                    icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] })
+                }).addTo(map).bindPopup(query).openPopup();
+                map.setView(suggestedDropoff, 13);
+            }
+        } catch (e) { console.error(e); }
     }
+
+    document.getElementById('setDropoffBtn').addEventListener('click', () => {
+        if (!dropoffMarker || !suggestedDropoff) return alert('Please search and select a dropoff location');
+        updateLocation('dropoff', suggestedDropoff.lat, suggestedDropoff.lng);
+        calculateDistance();
+    });
 
     async function updateLocation(type, lat, lng) {
         const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&apiKey=${geoapifyApiKey}`;
@@ -152,10 +178,10 @@
         const pickup = `${pickupMarker.getLatLng().lat},${pickupMarker.getLatLng().lng}`;
         const dropoff = `${dropoffMarker.getLatLng().lat},${dropoffMarker.getLatLng().lng}`;
         try {
-            const response = await fetch('/api/rides/book', {
+            const response = await fetch('/api/rides/book?currentLocation=' + encodeURIComponent(pickup), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: 'user1', vehicleType, pickupLocation: pickup, dropoffLocation: dropoff, fare: parseFloat(document.getElementById('carPrice').textContent.replace('$', '')) })
+                body: JSON.stringify({ userId: 'user1', vehicleType, dropoffLocation: dropoff, fare: parseFloat(document.getElementById('carPrice').textContent.replace('$', '')) })
             });
             const data = await response.json();
             document.getElementById('message').textContent = `Ride booked with ID: ${data.id}. Redirecting...`;

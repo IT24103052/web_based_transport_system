@@ -6,7 +6,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-    <script src="https://unpkg.com/@mapbox/polyline/dist/polyline.js"></script>
     <style>
         body { background-color: #ffffff; color: #000000; }
         #map { height: 600px; width: 100%; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -38,8 +37,8 @@
 </div>
 
 <script>
-    let map, driverMarkers = [], rideId, pickup, dropoff, routeLayer;
-    const locationiqApiKey = 'YOUR_LOCATIONIQ_API_KEY';
+    let map, driverMarkers = [], vehicleMarker, rideId, pickup, dropoff, routeLayer;
+    const geoapifyApiKey = '9efd1d5a33794a978148be1526c83da6';
 
     function initMap() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -50,17 +49,33 @@
         map = L.map('map').setView([(pickup[0] + dropoff[0]) / 2, (pickup[1] + dropoff[1]) / 2], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
 
-        // Markers
-        L.marker(pickup, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) }).addTo(map).bindPopup('Pickup').openPopup();
-        L.marker(dropoff, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map).bindPopup('Dropoff').openPopup();
+        // Pickup and Dropoff Markers
+        L.marker(pickup, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) })
+            .addTo(map).bindPopup('Pickup').openPopup();
+        L.marker(dropoff, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) })
+            .addTo(map).bindPopup('Dropoff').openPopup();
 
         // Simulated drivers
-        const drivers = [{id:1,lat:6.9,lng:79.8},{id:2,lat:6.95,lng:79.85},{id:3,lat:7.0,lng:79.9}];
+        const drivers = [
+            { id: 1, lat: 6.9, lng: 79.8 },
+            { id: 2, lat: 6.95, lng: 79.85 },
+            { id: 3, lat: 7.0, lng: 79.9 }
+        ];
         drivers.forEach(driver => {
-            const marker = L.marker([driver.lat, driver.lng], { icon: L.icon({ iconUrl:'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png', iconSize:[32,32] }) })
+            const marker = L.marker([driver.lat, driver.lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png', iconSize: [32, 32] }) })
                 .addTo(map).bindPopup(`Driver ${driver.id}`);
             driverMarkers.push(marker);
         });
+
+        // Add vehicle marker (e.g., booked vehicle) at pickup location
+        vehicleMarker = L.marker(pickup, {
+            icon: L.icon({
+                iconUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202003.png', // Car icon
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -32]
+            })
+        }).addTo(map).bindPopup('Your Vehicle');
 
         document.getElementById('rideId').textContent = rideId || 'N/A';
         simulateDriverAcceptance();
@@ -72,6 +87,9 @@
             if (Math.random() > 0.3) {
                 alert('Driver has accepted your ride!');
                 document.getElementById('status').textContent = 'Accepted';
+                // Optionally move vehicle marker to simulate progress (e.g., halfway to dropoff)
+                const midPoint = [(pickup[0] + dropoff[0]) / 2, (pickup[1] + dropoff[1]) / 2];
+                vehicleMarker.setLatLng(midPoint).bindPopup('Your Vehicle - En Route').openPopup();
             } else {
                 document.getElementById('message').textContent = 'No driver accepted yet. Retrying...';
                 setTimeout(simulateDriverAcceptance, 5000);
@@ -80,42 +98,49 @@
     }
 
     async function calculateRoute() {
-        const url = `https://us1.locationiq.com/v1/directions/driving/${pickup[1]},${pickup[0]};${dropoff[1]},${dropoff[0]}?key=${locationiqApiKey}`;
+        const url = `https://api.geoapify.com/v1/routing?waypoints=${pickup[0]},${pickup[1]}|${dropoff[0]},${dropoff[1]}&mode=drive&apiKey=${geoapifyApiKey}`;
         try {
-            const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
             const data = await res.json();
-            if (data.code === 'ok' && data.routes?.length) {
-                const route = data.routes[0];
-                document.getElementById('rideDetails').textContent = `Distance: ${(route.distance/1000).toFixed(2)} km, Duration: ${(route.duration/60).toFixed(1)} mins`;
+            if (data.features?.length) {
+                const { distance, time } = data.features[0].properties;
+                const coords = data.features[0].geometry.coordinates[0].map(c => [c[1], c[0]]); // Swap [lng, lat] to [lat, lng] for Leaflet
                 if (routeLayer) routeLayer.remove();
-                const coords = polyline.decode(route.geometry);
-                routeLayer = L.polyline(coords.map(c=>[c[0],c[1]]), { color:'blue', weight:5 }).addTo(map);
-                map.fitBounds(routeLayer.getBounds());
+                routeLayer = L.polyline(coords, { color: 'blue', weight: 5 }).addTo(map);
+                map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+                document.getElementById('rideDetails').textContent = `Distance: ${(distance / 1000).toFixed(2)} km, Duration: ${(time / 60).toFixed(1)} mins`;
+            } else {
+                document.getElementById('rideDetails').textContent = 'No route found. Please check locations.';
             }
-        } catch(e) { console.error(e); }
+        } catch (e) {
+            document.getElementById('rideDetails').textContent = 'Error calculating route. Please try again.';
+            console.error('Routing error:', e);
+        }
     }
 
-    document.getElementById('updateLocationBtn').addEventListener('click', ()=>{
+    document.getElementById('updateLocationBtn').addEventListener('click', () => {
         window.location.href = `updateLocation.html?rideId=${rideId}&pickup=${pickup.join(',')}&dropoff=${dropoff.join(',')}`;
     });
 
-    document.getElementById('cancelRideBtn').addEventListener('click', ()=>{
-        if(confirm('Are you sure you want to cancel the ride?')){
-            fetch(`/api/rides/cancel/${rideId}`, { method:'DELETE' })
-                .then(res=>{
-                    if(res.ok){
-                        document.getElementById('status').textContent='Cancelled';
-                        document.getElementById('updateLocationBtn').disabled=true;
-                        document.getElementById('cancelRideBtn').disabled=true;
-                        document.getElementById('message').textContent='Ride cancelled successfully';
-                        setTimeout(()=>window.location.href='ride-booking.html',2000);
+    document.getElementById('cancelRideBtn').addEventListener('click', () => {
+        if (confirm('Are you sure you want to cancel the ride?')) {
+            fetch(`/api/rides/cancel/${rideId}`, { method: 'DELETE' })
+                .then(res => {
+                    if (res.ok) {
+                        document.getElementById('status').textContent = 'Cancelled';
+                        document.getElementById('updateLocationBtn').disabled = true;
+                        document.getElementById('cancelRideBtn').disabled = true;
+                        document.getElementById('message').textContent = 'Ride cancelled successfully';
+                        setTimeout(() => window.location.href = 'ride-booking.html', 2000);
                     } else {
-                        document.getElementById('message').textContent='Error cancelling ride';
+                        document.getElementById('message').textContent = 'Error cancelling ride';
                     }
-                }).catch(e=>{
-                document.getElementById('message').textContent='Error cancelling ride';
-                console.error(e);
-            });
+                })
+                .catch(e => {
+                    document.getElementById('message').textContent = 'Error cancelling ride';
+                    console.error('Cancel error:', e);
+                });
         }
     });
 

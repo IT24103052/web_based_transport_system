@@ -17,7 +17,6 @@
     </style>
 </head>
 <body class="p-6">
-
 <div class="max-w-md mx-auto bg-white shadow-lg rounded-xl p-6">
     <h2 class="text-3xl font-bold mb-6 text-center text-black">Update Locations</h2>
 
@@ -36,7 +35,7 @@
 </div>
 
 <script>
-    let map, pickupMarker, dropoffMarker, clickCount = 0;
+    let map, pickupMarker, dropoffMarker;
     const geoapifyApiKey = '9efd1d5a33794a978148be1526c83da6';
 
     function initMap() {
@@ -48,30 +47,46 @@
         map = L.map('map').setView([(initialPickup[0] + initialDropoff[0]) / 2, (initialPickup[1] + initialDropoff[1]) / 2], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
 
-        pickupMarker = L.marker(initialPickup, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) })
-            .addTo(map).bindPopup('Pickup').openPopup();
-        dropoffMarker = L.marker(initialDropoff, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) })
-            .addTo(map).bindPopup('Dropoff').openPopup();
+        // Set pickup as current location or initial pickup
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    pickupMarker = L.marker([latitude, longitude], {
+                        icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] })
+                    }).addTo(map).bindPopup('Pickup').openPopup();
+                    updateLocation('pickup', latitude, longitude);
+                    map.setView([latitude, longitude], 13);
+                },
+                (error) => {
+                    console.error("Error getting current location:", error);
+                    pickupMarker = L.marker(initialPickup, {
+                        icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] })
+                    }).addTo(map).bindPopup('Pickup').openPopup();
+                    updateLocation('pickup', initialPickup[0], initialPickup[1]);
+                }
+            );
+        } else {
+            pickupMarker = L.marker(initialPickup, {
+                icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] })
+            }).addTo(map).bindPopup('Pickup').openPopup();
+            updateLocation('pickup', initialPickup[0], initialPickup[1]);
+        }
 
-        document.getElementById('pickup').textContent = `Lat: ${initialPickup[0].toFixed(4)}, Lng: ${initialPickup[1].toFixed(4)}`;
-        document.getElementById('dropoff').textContent = `Lat: ${initialDropoff[0].toFixed(4)}, Lng: ${initialDropoff[1].toFixed(4)}`;
+        // Set initial dropoff
+        dropoffMarker = L.marker(initialDropoff, {
+            icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] })
+        }).addTo(map).bindPopup('Dropoff').openPopup();
+        updateLocation('dropoff', initialDropoff[0], initialDropoff[1]);
 
         map.on('click', onMapClick);
     }
 
     function onMapClick(e) {
         const { lat, lng } = e.latlng;
-        clickCount++;
-        if (clickCount === 1) {
-            if (pickupMarker) pickupMarker.remove();
-            pickupMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) }).addTo(map);
-            updateLocation('pickup', lat, lng);
-        } else if (clickCount === 2) {
-            if (dropoffMarker) dropoffMarker.remove();
-            dropoffMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map);
-            updateLocation('dropoff', lat, lng);
-            clickCount = 0;
-        }
+        if (dropoffMarker) dropoffMarker.remove();
+        dropoffMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map);
+        updateLocation('dropoff', lat, lng);
         map.fitBounds([pickupMarker.getLatLng(), dropoffMarker.getLatLng()]);
     }
 
@@ -88,7 +103,7 @@
     }
 
     document.getElementById('updateButton').addEventListener('click', async () => {
-        if (!pickupMarker || !dropoffMarker) return document.getElementById('message').textContent = 'Please select both locations';
+        if (!pickupMarker || !dropoffMarker) return document.getElementById('message').textContent = 'Please select dropoff location';
         const urlParams = new URLSearchParams(window.location.search);
         const rideId = urlParams.get('rideId');
         const pickup = `${pickupMarker.getLatLng().lat},${pickupMarker.getLatLng().lng}`;
