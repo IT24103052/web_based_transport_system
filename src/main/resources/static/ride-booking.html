@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ride Booking</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <style>
+        body { background-color: #ffffff; color: #000000; }
+        #map { height: 600px; width: 100%; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .vehicle-card { border: 2px solid transparent; border-radius: 12px; padding: 6px; cursor: pointer; transition: all 0.3s ease; }
+        .vehicle-card:hover { transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .vehicle-card.selected { border-color: #f97316; background-color: #fff7ed; }
+        .info-box { padding: 12px; background: #fefefe; border: 1px solid #ddd; margin: 15px 0; border-radius: 10px; max-width: 100%; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+        .info-box p { margin: 6px 0; }
+        .highlight { font-weight: bold; color: #f97316; }
+        input:focus { outline: none; border-color: #f97316; shadow: 0 0 5px rgba(249,115,22,0.3); }
+        button:hover { background-color: #fb923c; transform: translateY(-2px); transition: all 0.3s ease; }
+    </style>
+</head>
+<body class="p-6">
+<div class="max-w-md mx-auto bg-white p-6 rounded-xl shadow-lg">
+    <h2 class="text-3xl font-bold mb-6 text-center text-orange-500">Ride Booking</h2>
+
+    <!-- Map -->
+    <div id="map"></div>
+
+    <!-- Info Box -->
+    <div class="info-box">
+        <p>Pickup Location: <span id="pickup" class="highlight">Not selected</span></p>
+        <p>Dropoff Location: <span id="dropoff" class="highlight">Not selected</span></p>
+        <p>Distance: <span id="distance" class="highlight">-</span> km</p>
+        <p>Time: <span id="duration" class="highlight">-</span> mins</p>
+    </div>
+
+    <!-- Pickup & Dropoff Inputs -->
+    <input type="text" id="pickupInput" placeholder="Pickup Location" class="w-full p-3 mb-3 border border-gray-300 rounded-lg" readonly>
+    <input type="text" id="dropoffInput" placeholder="Dropoff Location" class="w-full p-3 mb-5 border border-gray-300 rounded-lg" readonly>
+
+    <!-- Vehicle Selection -->
+    <div class="grid grid-cols-3 gap-4 mb-5">
+        <div class="text-center vehicle-card" id="bikeCard">
+            <label for="bikeRadio">
+                <img src="/image/Bike.jpg" alt="Bike" class="w-full h-28 object-cover mb-2 rounded-lg">
+                <p id="bikePrice" class="text-orange-500 font-semibold">$0</p>
+            </label>
+            <input type="radio" name="vehicle" value="bike" class="hidden" id="bikeRadio">
+            <p class="text-sm font-medium mt-1">Bike</p>
+        </div>
+        <div class="text-center vehicle-card" id="carCard">
+            <label for="carRadio">
+                <img src="/image/car.jpg" alt="Car" class="w-full h-28 object-cover mb-2 rounded-lg">
+                <p id="carPrice" class="text-orange-500 font-semibold">$0</p>
+            </label>
+            <input type="radio" name="vehicle" value="car" class="hidden" id="carRadio">
+            <p class="text-sm font-medium mt-1">Car</p>
+        </div>
+        <div class="text-center vehicle-card" id="autoCard">
+            <label for="autoRadio">
+                <img src="/image/Auto.jpg" alt="Auto" class="w-full h-28 object-cover mb-2 rounded-lg">
+                <p id="autoPrice" class="text-orange-500 font-semibold">$0</p>
+            </label>
+            <input type="radio" name="vehicle" value="auto" class="hidden" id="autoRadio">
+            <p class="text-sm font-medium mt-1">Auto</p>
+        </div>
+    </div>
+
+    <!-- Book Button -->
+    <button id="bookButton" class="w-full bg-orange-500 text-white p-3 rounded-lg font-bold shadow-md">Book Ride</button>
+    <p id="message" class="mt-4 text-orange-500 font-medium"></p>
+</div>
+
+<script>
+    let map, pickupMarker, dropoffMarker, routeLayer, clickCount = 0;
+    const geoapifyApiKey = '9efd1d5a33794a978148be1526c83da6';
+
+    function initMap() {
+        map = L.map('map').setView([6.9271, 79.8612], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+        map.on('click', onMapClick);
+    }
+
+    function onMapClick(e) {
+        const { lat, lng } = e.latlng;
+        clickCount++;
+        if (clickCount === 1) {
+            if (pickupMarker) pickupMarker.remove();
+            pickupMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) }).addTo(map);
+            updateLocation('pickup', lat, lng);
+        } else if (clickCount === 2) {
+            if (dropoffMarker) dropoffMarker.remove();
+            dropoffMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map);
+            updateLocation('dropoff', lat, lng);
+            calculateDistance();
+            clickCount = 0;
+        }
+        map.fitBounds([pickupMarker?.getLatLng() || [6.9271, 79.8612], dropoffMarker?.getLatLng() || [6.9271, 79.8612]]);
+    }
+
+    async function updateLocation(type, lat, lng) {
+        const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&apiKey=${geoapifyApiKey}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.features?.length) {
+                const formatted = data.features[0].properties.formatted;
+                if (type === 'pickup') {
+                    document.getElementById('pickup').textContent = formatted;
+                    document.getElementById('pickupInput').value = formatted;
+                } else {
+                    document.getElementById('dropoff').textContent = formatted;
+                    document.getElementById('dropoffInput').value = formatted;
+                }
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    async function calculateDistance() {
+        if (!pickupMarker || !dropoffMarker) return;
+        const pickup = pickupMarker.getLatLng();
+        const dropoff = dropoffMarker.getLatLng();
+        const url = `https://api.geoapify.com/v1/routing?waypoints=${pickup.lat},${pickup.lng}|${dropoff.lat},${dropoff.lng}&mode=drive&apiKey=${geoapifyApiKey}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.features?.length) {
+                const { distance, time } = data.features[0].properties;
+                const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                if (routeLayer) routeLayer.remove();
+                routeLayer = L.polyline(coords, { color: 'blue', weight: 5 }).addTo(map);
+                map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+                document.getElementById('distance').textContent = (distance / 1000).toFixed(2);
+                document.getElementById('duration').textContent = (time / 60).toFixed(1);
+                updatePrices(distance / 1000);
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    function updatePrices(distance) {
+        const rates = { bike: 0.5, car: 1.0, auto: 0.7 };
+        document.getElementById('bikePrice').textContent = `$${(distance * rates.bike).toFixed(2)}`;
+        document.getElementById('carPrice').textContent = `$${(distance * rates.car).toFixed(2)}`;
+        document.getElementById('autoPrice').textContent = `$${(distance * rates.auto).toFixed(2)}`;
+    }
+
+    document.getElementById('bookButton').addEventListener('click', async () => {
+        const vehicleType = document.querySelector('input[name="vehicle"]:checked')?.value;
+        if (!vehicleType || !pickupMarker || !dropoffMarker) return alert('Select vehicle and locations');
+        const pickup = `${pickupMarker.getLatLng().lat},${pickupMarker.getLatLng().lng}`;
+        const dropoff = `${dropoffMarker.getLatLng().lat},${dropoffMarker.getLatLng().lng}`;
+        try {
+            const response = await fetch('/api/rides/book', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: 'user1', vehicleType, pickupLocation: pickup, dropoffLocation: dropoff, fare: parseFloat(document.getElementById('carPrice').textContent.replace('$', '')) })
+            });
+            const data = await response.json();
+            document.getElementById('message').textContent = `Ride booked with ID: ${data.id}. Redirecting...`;
+            setTimeout(() => window.location.href = `tracking.html?rideId=${data.id}&pickup=${pickup}&dropoff=${dropoff}`, 2000);
+        } catch (e) {
+            document.getElementById('message').textContent = 'Booking failed';
+            console.error(e);
+        }
+    });
+
+    document.querySelectorAll('.vehicle-card').forEach(card => {
+        card.addEventListener('click', () => {
+            document.querySelectorAll('.vehicle-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            card.querySelector('input').checked = true;
+        });
+    });
+
+    initMap();
+</script>
+</body>
+</html>
