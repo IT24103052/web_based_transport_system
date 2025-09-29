@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Update Locations</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <style>
+        body { background-color: #ffffff; color: #000000; }
+        #map { height: 600px; width: 100%; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .info-box { padding: 16px; background: #fff; border: 1px solid #e5e7eb; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+        .highlight { font-weight: bold; color: #f97316; }
+        .animate-fade { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        button:hover { transform: translateY(-2px); transition: all 0.3s ease; }
+    </style>
+</head>
+<body class="p-6">
+
+<div class="max-w-md mx-auto bg-white shadow-lg rounded-xl p-6">
+    <h2 class="text-3xl font-bold mb-6 text-center text-black">Update Locations</h2>
+
+    <!-- Map -->
+    <div id="map"></div>
+
+    <!-- Info Box -->
+    <div class="info-box animate-fade">
+        <p>Pickup Location: <span id="pickup" class="highlight">Not selected</span></p>
+        <p>Dropoff Location: <span id="dropoff" class="highlight">Not selected</span></p>
+    </div>
+
+    <!-- Update Button -->
+    <button id="updateButton" class="w-full bg-orange-500 text-white p-3 rounded-lg font-semibold shadow-md hover:bg-orange-600 animate-fade">Update Locations</button>
+    <p id="message" class="mt-4 text-center text-orange-500 font-medium animate-fade"></p>
+</div>
+
+<script>
+    let map, pickupMarker, dropoffMarker, clickCount = 0;
+    const geoapifyApiKey = '9efd1d5a33794a978148be1526c83da6';
+
+    function initMap() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const rideId = urlParams.get('rideId');
+        const initialPickup = urlParams.get('pickup')?.split(',').map(Number) || [6.9271, 79.8612];
+        const initialDropoff = urlParams.get('dropoff')?.split(',').map(Number) || [6.9271, 79.8612];
+
+        map = L.map('map').setView([(initialPickup[0] + initialDropoff[0]) / 2, (initialPickup[1] + initialDropoff[1]) / 2], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+
+        pickupMarker = L.marker(initialPickup, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) })
+            .addTo(map).bindPopup('Pickup').openPopup();
+        dropoffMarker = L.marker(initialDropoff, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) })
+            .addTo(map).bindPopup('Dropoff').openPopup();
+
+        document.getElementById('pickup').textContent = `Lat: ${initialPickup[0].toFixed(4)}, Lng: ${initialPickup[1].toFixed(4)}`;
+        document.getElementById('dropoff').textContent = `Lat: ${initialDropoff[0].toFixed(4)}, Lng: ${initialDropoff[1].toFixed(4)}`;
+
+        map.on('click', onMapClick);
+    }
+
+    function onMapClick(e) {
+        const { lat, lng } = e.latlng;
+        clickCount++;
+        if (clickCount === 1) {
+            if (pickupMarker) pickupMarker.remove();
+            pickupMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) }).addTo(map);
+            updateLocation('pickup', lat, lng);
+        } else if (clickCount === 2) {
+            if (dropoffMarker) dropoffMarker.remove();
+            dropoffMarker = L.marker([lat, lng], { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map);
+            updateLocation('dropoff', lat, lng);
+            clickCount = 0;
+        }
+        map.fitBounds([pickupMarker.getLatLng(), dropoffMarker.getLatLng()]);
+    }
+
+    async function updateLocation(type, lat, lng) {
+        const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&apiKey=${geoapifyApiKey}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.features?.length) {
+                const formatted = data.features[0].properties.formatted;
+                document.getElementById(type).textContent = formatted;
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    document.getElementById('updateButton').addEventListener('click', async () => {
+        if (!pickupMarker || !dropoffMarker) return document.getElementById('message').textContent = 'Please select both locations';
+        const urlParams = new URLSearchParams(window.location.search);
+        const rideId = urlParams.get('rideId');
+        const pickup = `${pickupMarker.getLatLng().lat},${pickupMarker.getLatLng().lng}`;
+        const dropoff = `${dropoffMarker.getLatLng().lat},${dropoffMarker.getLatLng().lng}`;
+        try {
+            const response = await fetch(`/api/rides/update-location/${rideId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pickupLocation: pickup, dropoffLocation: dropoff })
+            });
+            if (response.ok) {
+                document.getElementById('message').textContent = 'Locations updated successfully';
+                setTimeout(() => window.location.href = `tracking.html?rideId=${rideId}&pickup=${pickup}&dropoff=${dropoff}`, 2000);
+            } else {
+                document.getElementById('message').textContent = 'Error updating locations';
+            }
+        } catch (e) {
+            document.getElementById('message').textContent = 'Error updating locations';
+            console.error(e);
+        }
+    });
+
+    initMap();
+</script>
+</body>
+</html>

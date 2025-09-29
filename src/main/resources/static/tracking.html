@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ride Tracking</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/@mapbox/polyline/dist/polyline.js"></script>
+    <style>
+        body { background-color: #ffffff; color: #000000; }
+        #map { height: 600px; width: 100%; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .info-box { padding: 16px; background: #fff; border: 1px solid #e5e7eb; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+        .highlight { font-weight: bold; color: #f97316; }
+        .animate-fade { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        button:hover { transform: translateY(-2px); transition: all 0.3s ease; }
+    </style>
+</head>
+<body class="p-6">
+<div class="max-w-md mx-auto bg-white shadow-lg rounded-xl p-6">
+    <h2 class="text-3xl font-bold mb-6 text-center text-black">Ride Tracking</h2>
+
+    <!-- Map -->
+    <div id="map"></div>
+
+    <!-- Ride Info -->
+    <div class="info-box animate-fade">
+        <p>Ride ID: <span id="rideId" class="highlight"></span></p>
+        <p>Status: <span id="status" class="highlight">Pending</span></p>
+        <p id="rideDetails" class="mt-2 text-sm text-gray-600"></p>
+    </div>
+
+    <!-- Action Buttons -->
+    <button id="updateLocationBtn" class="w-full bg-orange-500 text-white p-3 rounded-lg mb-3 hover:bg-orange-600 font-semibold shadow-md animate-fade">Update Location</button>
+    <button id="cancelRideBtn" class="w-full bg-orange-500 text-white p-3 rounded-lg hover:bg-orange-600 font-semibold shadow-md animate-fade">Cancel Ride</button>
+    <p id="message" class="mt-4 text-center text-orange-500 font-medium animate-fade"></p>
+</div>
+
+<script>
+    let map, driverMarkers = [], rideId, pickup, dropoff, routeLayer;
+    const locationiqApiKey = 'YOUR_LOCATIONIQ_API_KEY';
+
+    function initMap() {
+        const urlParams = new URLSearchParams(window.location.search);
+        rideId = urlParams.get('rideId');
+        pickup = urlParams.get('pickup')?.split(',').map(Number) || [6.9271, 79.8612];
+        dropoff = urlParams.get('dropoff')?.split(',').map(Number) || [6.9271, 79.8612];
+
+        map = L.map('map').setView([(pickup[0] + dropoff[0]) / 2, (pickup[1] + dropoff[1]) / 2], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+
+        // Markers
+        L.marker(pickup, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', iconSize: [32, 32] }) }).addTo(map).bindPopup('Pickup').openPopup();
+        L.marker(dropoff, { icon: L.icon({ iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png', iconSize: [32, 32] }) }).addTo(map).bindPopup('Dropoff').openPopup();
+
+        // Simulated drivers
+        const drivers = [{id:1,lat:6.9,lng:79.8},{id:2,lat:6.95,lng:79.85},{id:3,lat:7.0,lng:79.9}];
+        drivers.forEach(driver => {
+            const marker = L.marker([driver.lat, driver.lng], { icon: L.icon({ iconUrl:'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png', iconSize:[32,32] }) })
+                .addTo(map).bindPopup(`Driver ${driver.id}`);
+            driverMarkers.push(marker);
+        });
+
+        document.getElementById('rideId').textContent = rideId || 'N/A';
+        simulateDriverAcceptance();
+        calculateRoute();
+    }
+
+    function simulateDriverAcceptance() {
+        setTimeout(() => {
+            if (Math.random() > 0.3) {
+                alert('Driver has accepted your ride!');
+                document.getElementById('status').textContent = 'Accepted';
+            } else {
+                document.getElementById('message').textContent = 'No driver accepted yet. Retrying...';
+                setTimeout(simulateDriverAcceptance, 5000);
+            }
+        }, 2000);
+    }
+
+    async function calculateRoute() {
+        const url = `https://us1.locationiq.com/v1/directions/driving/${pickup[1]},${pickup[0]};${dropoff[1]},${dropoff[0]}?key=${locationiqApiKey}`;
+        try {
+            const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+            const data = await res.json();
+            if (data.code === 'ok' && data.routes?.length) {
+                const route = data.routes[0];
+                document.getElementById('rideDetails').textContent = `Distance: ${(route.distance/1000).toFixed(2)} km, Duration: ${(route.duration/60).toFixed(1)} mins`;
+                if (routeLayer) routeLayer.remove();
+                const coords = polyline.decode(route.geometry);
+                routeLayer = L.polyline(coords.map(c=>[c[0],c[1]]), { color:'blue', weight:5 }).addTo(map);
+                map.fitBounds(routeLayer.getBounds());
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    document.getElementById('updateLocationBtn').addEventListener('click', ()=>{
+        window.location.href = `updateLocation.html?rideId=${rideId}&pickup=${pickup.join(',')}&dropoff=${dropoff.join(',')}`;
+    });
+
+    document.getElementById('cancelRideBtn').addEventListener('click', ()=>{
+        if(confirm('Are you sure you want to cancel the ride?')){
+            fetch(`/api/rides/cancel/${rideId}`, { method:'DELETE' })
+                .then(res=>{
+                    if(res.ok){
+                        document.getElementById('status').textContent='Cancelled';
+                        document.getElementById('updateLocationBtn').disabled=true;
+                        document.getElementById('cancelRideBtn').disabled=true;
+                        document.getElementById('message').textContent='Ride cancelled successfully';
+                        setTimeout(()=>window.location.href='ride-booking.html',2000);
+                    } else {
+                        document.getElementById('message').textContent='Error cancelling ride';
+                    }
+                }).catch(e=>{
+                document.getElementById('message').textContent='Error cancelling ride';
+                console.error(e);
+            });
+        }
+    });
+
+    initMap();
+</script>
+</body>
+</html>
