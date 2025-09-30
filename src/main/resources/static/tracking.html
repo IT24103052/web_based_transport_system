@@ -42,7 +42,7 @@
 </div>
 
 <script>
-    let map, driverMarkers = [], rideId, pickup, dropoff, routeLayer, vehicleMarker, routeCoords = [], routingControl;
+    let map, driverMarkers = [], rideId, pickup, dropoff, routeLayer, vehicleMarker, routeCoords = [], routingControl, selectedVehicleType;
     const geoapifyApiKey = '9efd1d5a33794a978148be1526c83da6';
 
     function initMap() {
@@ -54,6 +54,7 @@
         }
         pickup = urlParams.get('pickup')?.split(',').map(Number) || [6.9271, 79.8612];
         dropoff = urlParams.get('dropoff')?.split(',').map(Number) || [6.9271, 79.8612];
+        selectedVehicleType = urlParams.get('vehicleType') || 'car'; // Default to 'car' if not provided
 
         map = L.map('map', { attributionControl: false }).setView([(pickup[0] + dropoff[0]) / 2, (pickup[1] + dropoff[1]) / 2], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '' }).addTo(map);
@@ -119,12 +120,18 @@
                         for (let i = 0; i < vehicleCount; i++) {
                             const lat = latitude + (Math.random() - 0.5) * 0.1;
                             const lng = longitude + (Math.random() - 0.5) * 0.1;
-                            const vehicleIcon = L.icon({
-                                iconUrl: i % 3 === 0 ? '/image/Bike.jpg' : i % 3 === 1 ? '/image/car.jpg' : '/image/Auto.jpg',
-                                iconSize: [32, 32]
-                            });
-                            const marker = L.marker([lat, lng], { icon: vehicleIcon }).addTo(map);
-                            driverMarkers.push(marker);
+                            let vehicleIcon;
+                            if (selectedVehicleType === 'bike') {
+                                vehicleIcon = L.icon({ iconUrl: '/image/Bike.jpg', iconSize: [32, 32] });
+                            } else if (selectedVehicleType === 'car') {
+                                vehicleIcon = L.icon({ iconUrl: '/image/car.jpg', iconSize: [32, 32] });
+                            } else if (selectedVehicleType === 'auto') {
+                                vehicleIcon = L.icon({ iconUrl: '/image/Auto.jpg', iconSize: [32, 32] });
+                            }
+                            if (vehicleIcon) {
+                                const marker = L.marker([lat, lng], { icon: vehicleIcon }).addTo(map);
+                                driverMarkers.push(marker);
+                            }
                         }
                     } catch (e) { console.error(e); }
                 },
@@ -148,10 +155,14 @@
 
     function simulateVehicleMovement() {
         if (routeCoords.length === 0) return;
-        const vehicleIcon = L.icon({
-            iconUrl: '/image/car.jpg',
-            iconSize: [32, 32]
-        });
+        let vehicleIcon;
+        if (selectedVehicleType === 'bike') {
+            vehicleIcon = L.icon({ iconUrl: '/image/Bike.jpg', iconSize: [32, 32] });
+        } else if (selectedVehicleType === 'car') {
+            vehicleIcon = L.icon({ iconUrl: '/image/car.jpg', iconSize: [32, 32] });
+        } else if (selectedVehicleType === 'auto') {
+            vehicleIcon = L.icon({ iconUrl: '/image/Auto.jpg', iconSize: [32, 32] });
+        }
         vehicleMarker = L.marker(routeCoords[0], { icon: vehicleIcon }).addTo(map);
         let index = 0;
         const interval = setInterval(() => {

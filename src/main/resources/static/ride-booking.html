@@ -195,7 +195,7 @@
             });
             const data = await response.json();
             document.getElementById('message').textContent = `Ride booked with ID: ${data.id}. Redirecting...`;
-            setTimeout(() => window.location.href = `tracking.html?rideId=${data.id}&pickup=${pickup}&dropoff=${dropoff}`, 2000);
+            setTimeout(() => window.location.href = `tracking.html?rideId=${data.id}&pickup=${pickup}&dropoff=${dropoff}&vehicleType=${vehicleType}`, 2000);
         } catch (e) {
             document.getElementById('message').textContent = 'Booking failed';
             console.error(e);
