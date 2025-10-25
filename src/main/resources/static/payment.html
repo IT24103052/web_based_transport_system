@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Payment</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { background-color: #ffffff; color: #000000; }
+        .payment-option { border: 2px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 20px; cursor: pointer; transition: all 0.3s ease; }
+        .payment-option.selected { border-color: #f97316; background-color: #fff7ed; }
+        .payment-form { display: none; margin-top: 20px; }
+        .payment-form.show { display: block; }
+        button:hover { transform: translateY(-2px); transition: all 0.3s ease; }
+        #message.error { color: #dc2626; }
+        #message.success { color: #16a34a; }
+        #message.waiting { color: #6b7280; font-style: italic; }
+    </style>
+</head>
+<body class="p-6">
+<div class="max-w-md mx-auto bg-white p-6 rounded-xl shadow-lg">
+    <h2 class="text-3xl font-bold mb-6 text-center text-orange-500">Payment</h2>
+    <div class="mb-4">
+        <p class="text-center">Ride ID: <span id="rideId"></span></p>
+        <p class="text-center">User: <span id="userName"></span></p>
+        <p class="text-center">Driver: <span id="driverName"></span></p>
+        <p class="text-center">Vehicle: <span id="vehicle"></span></p>
+        <p class="text-center">Amount: $<span id="amount"></span></p>
+    </div>
+
+    <!-- Payment Options -->
+    <div class="payment-option" id="manualOption">
+        <h3 class="text-xl font-bold mb-2">Manual Payment (Cash)</h3>
+        <p>Pay the driver in cash upon completion.</p>
+    </div>
+    <div class="payment-option" id="cardOption">
+        <h3 class="text-xl font-bold mb-2">Card Payment</h3>
+        <p>Pay online using your card.</p>
+    </div>
+
+    <!-- Card Payment Form -->
+    <div id="cardForm" class="payment-form">
+        <input type="text" id="cardNumber" placeholder="Card Number (16 digits)" class="w-full p-3 mb-3 border border-gray-300 rounded-lg">
+        <input type="text" id="cvc" placeholder="CVC (3 digits)" class="w-full p-3 mb-5 border border-gray-300 rounded-lg">
+    </div>
+
+    <!-- Confirm Button -->
+    <button id="confirmPaymentBtn" class="w-full bg-orange-500 text-white p-3 rounded-lg font-bold shadow-md mt-4">Confirm Payment</button>
+    <p id="message" class="mt-4 text-center"></p>
+</div>
+
+<script>
+    let stompClient = null;
+    let reconnectTimeout = null;
+    const urlParams = new URLSearchParams(window.location.search);
+    const rideId = urlParams.get('rideId');
+    const amount = urlParams.get('amount');
+    const vehicle = urlParams.get('vehicle');
+    const driverName = urlParams.get('driverName');
+
+    document.getElementById('rideId').textContent = rideId || 'N/A';
+    document.getElementById('amount').textContent = amount || '0.00';
+    document.getElementById('vehicle').textContent = vehicle || 'N/A';
+    document.getElementById('driverName').textContent = driverName || 'N/A';
+
+    // Fetch user name
+    fetch(`http://localhost:8081/api/rides/${rideId}`)
+        .then(res => res.json())
+        .then(ride => {
+            document.getElementById('userName').textContent = ride.userId || 'N/A';
+        })
+        .catch(() => {
+            document.getElementById('userName').textContent = 'Unknown';
+        });
+
+    document.getElementById('manualOption').addEventListener('click', () => selectOption('MANUAL'));
+    document.getElementById('cardOption').addEventListener('click', () => selectOption('CARD'));
+
+    function selectOption(method) {
+        document.querySelectorAll('.payment-option').forEach(opt => opt.classList.remove('selected'));
+        document.getElementById(method === 'CARD' ? 'cardOption' : 'manualOption').classList.add('selected');
+        document.getElementById('cardForm').classList.toggle('show', method === 'CARD');
+    }
+
+    function connectWebSocket() {
+        if (stompClient && stompClient.connected) return;
+        const socket = new SockJS('http://localhost:8081/ws');
+        stompClient = Stomp.over(socket);
+        stompClient.connect({}, (frame) => {
+            console.log('WebSocket Connected in payment:', frame);
+            stompClient.subscribe('/topic/paymentUpdates/' + rideId, (message) => {
+                const payment = JSON.parse(message.body);
+                if (payment.status === 'SUCCESSFUL') {
+                    document.getElementById('message').textContent = 'Payment successful!';
+                    document.getElementById('message').className = 'success';
+                    setTimeout(() => window.location.href = `review.html?rideId=${rideId}`, 2000);
+                } else if (payment.status === 'REJECTED') {
+                    document.getElementById('message').textContent = 'Payment rejected by driver. Please try again.';
+                    document.getElementById('message').className = 'error';
+                    document.getElementById('confirmPaymentBtn').disabled = false;
+                }
+            });
+            clearTimeout(reconnectTimeout);
+        }, (error) => {
+            console.error('WebSocket Error:', error);
+            const delay = Math.min(5000 * Math.pow(2, (new Date().getTime() / 5000) | 0), 30000);
+            reconnectTimeout = setTimeout(connectWebSocket, delay);
+        });
+    }
+
+    document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
+        const selected = document.querySelector('.payment-option.selected');
+        if (!selected) {
+            document.getElementById('message').textContent = 'Please select a payment method.';
+            document.getElementById('message').className = 'error';
+            return;
+        }
+        const method = selected.id === 'cardOption' ? 'CARD' : 'MANUAL';
+        const payload = { method, rideId: parseInt(rideId), userId: document.getElementById('userName').textContent, driverId: driverName, amount: parseFloat(amount), vehicleType: vehicle };
+        if (method === 'CARD') {
+            payload.cardNumber = document.getElementById('cardNumber').value;
+            payload.cvc = document.getElementById('cvc').value;
+            if (!payload.cardNumber.match(/^\d{16}$/) || !payload.cvc.match(/^\d{3}$/)) {
+                document.getElementById('message').textContent = 'Invalid card details.';
+                document.getElementById('message').className = 'error';
+                return;
+            }
+        }
+        document.getElementById('confirmPaymentBtn').disabled = true;
+        try {
+            const res = await fetch(`http://localhost:8081/api/payments/${rideId}/confirm`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                if (method === 'CARD') {
+                    document.getElementById('message').textContent = 'Payment successful!';
+                    document.getElementById('message').className = 'success';
+                    setTimeout(() => window.location.href = `review.html?rideId=${rideId}`, 2000);
+                } else {
+                    document.getElementById('message').textContent = 'Waiting for driver confirmation...';
+                    document.getElementById('message').className = 'waiting';
+                }
+            } else {
+                const err = await res.text();
+                document.getElementById('message').textContent = `Error: ${err}`;
+                document.getElementById('message').className = 'error';
+                document.getElementById('confirmPaymentBtn').disabled = false;
+            }
+        } catch (e) {
+            document.getElementById('message').textContent = 'Network error.';
+            document.getElementById('message').className = 'error';
+            document.getElementById('confirmPaymentBtn').disabled = false;
+        }
+    });
+
+    window.addEventListener('load', connectWebSocket);
+</script>
+</body>
+</html>

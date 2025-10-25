@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Review Driver</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #ffffff; color: #000000; }
+        .star-rating { display: inline-block; font-size: 30px; }
+        .star { cursor: pointer; color: #ddd; transition: color 0.3s; }
+        .star.selected { color: #f97316; }
+        #message.error { color: #dc2626; }
+        #message.success { color: #16a34a; }
+    </style>
+</head>
+<body class="p-6">
+<div class="max-w-md mx-auto bg-white p-6 rounded-xl shadow-lg">
+    <h2 class="text-3xl font-bold mb-6 text-center text-orange-500">Review Driver</h2>
+    <p>Ride ID: <span id="rideId"></span></p>
+    <div class="mb-4">
+        <h3 class="text-xl font-bold mb-2">Rate the Driver</h3>
+        <div class="star-rating">
+            <span class="star" data-value="1">&#9733;</span>
+            <span class="star" data-value="2">&#9733;</span>
+            <span class="star" data-value="3">&#9733;</span>
+            <span class="star" data-value="4">&#9733;</span>
+            <span class="star" data-value="5">&#9733;</span>
+        </div>
+    </div>
+    <textarea id="feedback" placeholder="Share your feedback, complaints, or positive comments..." class="w-full p-3 mb-5 border border-gray-300 rounded-lg" rows="5"></textarea>
+    <button id="submitReviewBtn" class="w-full bg-orange-500 text-white p-3 rounded-lg font-bold shadow-md">Submit Review</button>
+    <p id="message" class="mt-4 text-center"></p>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const rideId = urlParams.get('rideId');
+    document.getElementById('rideId').textContent = rideId || 'N/A';
+    let rating = 0;
+
+    document.querySelectorAll('.star').forEach(star => {
+        star.addEventListener('click', () => {
+            rating = parseInt(star.dataset.value);
+            document.querySelectorAll('.star').forEach(s => s.classList.toggle('selected', parseInt(s.dataset.value) <= rating));
+        });
+    });
+
+    document.getElementById('submitReviewBtn').addEventListener('click', async () => {
+        if (rating === 0) {
+            document.getElementById('message').textContent = 'Please select a rating.';
+            document.getElementById('message').className = 'error';
+            return;
+        }
+        const feedback = document.getElementById('feedback').value;
+        const payload = { rideId, rating, feedback };
+        try {
+            const res = await fetch(`http://localhost:8081/api/reviews`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                document.getElementById('message').textContent = 'Review submitted!';
+                document.getElementById('message').className = 'success';
+                setTimeout(() => window.location.href = 'ride-booking.html', 2000);
+            } else {
+                document.getElementById('message').textContent = 'Error submitting review.';
+                document.getElementById('message').className = 'error';
+            }
+        } catch (e) {
+            document.getElementById('message').textContent = 'Network error.';
+            document.getElementById('message').className = 'error';
+        }
+    });
+</script>
+</body>
+</html>
